@@ -1,0 +1,35 @@
+{
+  "name": "FastHybridVibrationModel",
+  "input_size": 1024,
+  "input_channels": 1,
+  "output_classes": 4,
+  "architecture": {
+    "conv1_filters": 8,
+    "conv2_filters": 16,
+    "conv3_filters": 32,
+    "lstm_hidden": 32,
+    "time_steps": 32,
+    "fc1_size": 64
+  },
+  "training": {
+    "epochs": 20,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "validation_accuracy": 100.0
+  },
+  "quantization": {
+    "bits": 8,
+    "fixed_scale": 8
+  },
+  "statistics": {
+    "total_parameters": 17220,
+    "model_size_kb": 16.81640625
+  },
+  "fault_classes": {
+    "Normal": 0,
+    "Ball_Fault": 1,
+    "Inner_Race_Fault": 2,
+    "Outer_Race_Fault": 3
+  },
+  "export_timestamp": "2025-12-10 12:51:04"
+}

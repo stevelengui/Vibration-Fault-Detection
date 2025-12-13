@@ -1,0 +1,20 @@
+--- Makefile.backup2    2024-12-10 15:30:00.000000000 +0000
++++ Makefile    2024-12-10 15:31:00.000000000 +0000
+@@ -17,7 +17,7 @@
+ 
+ # Platform-specific flags
+ CFLAGS_HIFIVE1 = -march=rv32imac -mabi=ilp32 -DHIFIVE1 -DCPU_FREQ_HZ=32000000
+-CFLAGS_K210 = -march=rv64gc -mabi=lp64d -DK210 -DCPU_FREQ_HZ=400000000
++CFLAGS_K210 = -march=rv64gc -mabi=lp64d -mcmodel=medany -DK210 -DCPU_FREQ_HZ=400000000
+ CFLAGS_GENERIC = -march=rv32im -mabi=ilp32
+ 
+ # Compiler flags
+@@ -117,7 +117,7 @@
+ build_k210/firmware.elf: $(OBJS) $(K210_OBJS) start.o
+     @mkdir -p $(dir $@)
+     echo "Linking for K210..."
+-    $(CC) $(CFLAGS) -T linker_k210.ld --no-relax $(OBJS) $(K210_OBJS) start.o -o $@ $(LDFLAGS)
++    $(CC) $(CFLAGS) -T linker_k210.ld -mno-relax $(OBJS) $(K210_OBJS) start.o -o $@ $(LDFLAGS)
+ 
+ build_%/firmware.bin: build_%/firmware.elf
+     @echo "OBJCOPY $@"
