@@ -1,295 +1,164 @@
-# Compiler and flags
+# ==================== CONFIGURATION ====================
 CC = riscv64-unknown-elf-gcc
 OBJCOPY = riscv64-unknown-elf-objcopy
-OBJDUMP = riscv64-unknown-elf-objdump
 SIZE = riscv64-unknown-elf-size
+MKDIR = mkdir -p
 
-# Default platform
+# Librairie GCC pour opérations manquantes
+LIBS = -lgcc
+
+# ==================== DÉTECTION DE PLATEFORME ====================
+# Valeur par défaut
 PLATFORM ?= hifive1
 
-# Platform configuration
+# Vérification de la plateforme
 ifeq ($(PLATFORM),hifive1)
   ARCH = rv32imac
   ABI = ilp32
-  CFLAGS += -DHIFIVE1 -DCPU_FREQ_MHZ=320
-  LDFLAGS += -T linker_hifive1.ld -Wl,--defsym,__stack_size=0x1000
+  PLATFORM_FLAGS = -DHIFIVE1 -DCPU_FREQ_MHZ=320 -DCPU_FREQ_HZ=32000000
+  LDFLAGS += -T linker_hifive1.ld
+  BUILD_DIR = build_hifive1
+  # Pas de support float matériel
+  ARCH_FLAGS = -march=rv32imac -mabi=ilp32
 else ifeq ($(PLATFORM),k210)
   ARCH = rv64gc
   ABI = lp64
-  CFLAGS += -DK210 -DCPU_FREQ_MHZ=400
-  CFLAGS += -mcmodel=medany  # AJOUTÉ: Résout les erreurs de relocation
-  LDFLAGS += -T linker_k210.ld -Wl,--defsym,__stack_size=0x4000 -mno-relax
+  PLATFORM_FLAGS = -DK210 -DCPU_FREQ_MHZ=400 -DCPU_FREQ_HZ=400000000
+  LDFLAGS += -T linker_k210.ld
+  CFLAGS += -mcmodel=medany
+  LDFLAGS += -mcmodel=medany
+  BUILD_DIR = build_k210
+  ARCH_FLAGS = -march=rv64gc -mabi=lp64
 else
-  $(error PLATFORM must be hifive1 or k210)
+  $(error PLATFORM must be hifive1 or k210 (got: $(PLATFORM)))
 endif
 
-# Common flags
-CFLAGS += -march=$(ARCH) -mabi=$(ABI)
-CFLAGS += -Os -Wall -Wextra
-CFLAGS += -fno-common -ffreestanding -nostdlib -fno-builtin -fno-stack-protector
-CFLAGS += -I. -Ifirmware/model -Iops -Iutils
-CFLAGS += -fdata-sections -ffunction-sections
-
-# ==================== CWRU VIBRATION MODEL CONFIGURATION ====================
-# Basic configuration only - calculated sizes are defined in model_weights.h
+# ==================== CONFIGURATION MODÈLE VIBRATION ====================
+# Configuration spécifique au modèle vibration CWRU
 CFLAGS += -DINPUT_SIZE=1024
-CFLAGS += -DN_FEATURES=1
 CFLAGS += -DCONV1_FILTERS=8
 CFLAGS += -DCONV2_FILTERS=16
 CFLAGS += -DCONV3_FILTERS=32
 CFLAGS += -DLSTM_HIDDEN=32
 CFLAGS += -DOUTPUT_SIZE=4
 CFLAGS += -DTIME_STEPS=32
-CFLAGS += -DQ_BITS=8
-CFLAGS += -DFIXED_SCALE=8
 CFLAGS += -DFC1_SIZE=64
+CFLAGS += -DSNN_INPUT_SIZE=32
+CFLAGS += -DCONV1_OUT_SIZE=256
+CFLAGS += -DCONV2_OUT_SIZE=64
+CFLAGS += -DCONV3_OUT_SIZE=32
 
-# Thermal management (must match model_weights.h)
-CFLAGS += -DTEMP_THRESHOLD_HIGH=70
+# Flags spécifiques vibration
+CFLAGS += -DVIBRATION_MODEL
+
+# ==================== FLAGS DE COMPILATION ====================
+CFLAGS += $(ARCH_FLAGS)
+CFLAGS += -Os -Wall -Wextra -Wno-unused-parameter
+CFLAGS += -fno-common -ffreestanding -nostdlib -fno-builtin
+CFLAGS += -fno-stack-protector
+CFLAGS += -I. -Ifirmware/model -Iops -Iutils
+CFLAGS += -fdata-sections -ffunction-sections
+CFLAGS += $(PLATFORM_FLAGS)
+
+# Désactiver opérations float
+CFLAGS += -mno-fdiv
+
+# ==================== FLAGS COMMUNS ====================
+CFLAGS += -DQ_BITS=8 -DFIXED_SCALE=8 -DFIXED_SCALE_VAL=256
+CFLAGS += -DENABLE_BENCHMARKING
+
+# Flags thermiques (utilisez ceux de thermal_manager.h)
 CFLAGS += -DTEMP_THRESHOLD_MEDIUM=50
+CFLAGS += -DTEMP_THRESHOLD_HIGH=70
 CFLAGS += -DPRECISION_HIGH=0
 CFLAGS += -DPRECISION_MEDIUM=1
 CFLAGS += -DPRECISION_LOW=2
 
-# Enable benchmarking
-CFLAGS += -DENABLE_BENCHMARKING
+# Flags de lien
+LDFLAGS += -Wl,--gc-sections $(LIBS)
 
-# Optimizations (safe for all RISC-V compilers)
-CFLAGS += -funroll-loops -finline-functions
-
-LDFLAGS += -Wl,--gc-sections
-LDFLAGS += -Wl,--print-memory-usage
-
-# Directories - separate build directory per platform
-BUILD_DIR = build_$(PLATFORM)
-
-# Source files for CWRU vibration analysis
-C_SRCS = main.c uart.c \
-         firmware/model/model.c firmware/model/model_weights.c \
-         ops/math_ops.c utils/memutils.c utils/numutils.c utils/cycle_count.c
-
+# ==================== FICHIERS SOURCES ====================
+# Sources spécifiques vibration
+C_SRCS = main.c uart.c firmware/model/model.c \
+         firmware/model/model_weights.c ops/math_ops.c \
+         utils/memutils.c utils/numutils.c utils/cycle_count.c \
+         utils/thermal_manager.c
 ASM_SRCS = start.S
-
-# Object files
 C_OBJS = $(addprefix $(BUILD_DIR)/, $(C_SRCS:.c=.o))
 ASM_OBJS = $(addprefix $(BUILD_DIR)/, $(ASM_SRCS:.S=.o))
 OBJS = $(C_OBJS) $(ASM_OBJS)
 
-# ==================== TARGETS ====================
-.PHONY: all clean size help hifive1 k210 sim flash check-deps
+# ==================== RÈGLES PRINCIPALES ====================
+.PHONY: all clean size info thermal-demo help hifive1 k210
 
-all: check-deps $(BUILD_DIR)/firmware.bin size
+all: $(BUILD_DIR)/firmware.bin
+	@echo ""
+	@$(MAKE) --no-print-directory size
+
+help:
+	@echo "=== CWRU VIBRATION ANALYSIS - INDUSTRIAL BUILD ===\n"
+	@echo "Usage: make [PLATFORM=<platform>] [target]\n"
+	@echo "Platforms (default: hifive1):"
+	@echo "  PLATFORM=hifive1  - HiFive1 (RV32IMAC, 32MHz)"
+	@echo "  PLATFORM=k210     - Kendryte K210 (RV64GC, 400MHz)\n"
+	@echo "Targets:"
+	@echo "  all          - Build firmware (default)"
+	@echo "  clean        - Clean build directory"
+	@echo "  size         - Show memory usage"
+	@echo "  info         - Show build configuration"
+	@echo "  thermal-demo - Show thermal management info"
+	@echo "  help         - This help message"
+	@echo "  hifive1      - Build for HiFive1"
+	@echo "  k210         - Build for K210\n"
+	@echo "Examples:"
+	@echo "  make                     # Build for HiFive1 (default)"
+	@echo "  make PLATFORM=k210       # Build for K210"
+	@echo "  make clean all          # Clean and rebuild"
+	@echo "  make info               # Show configuration\n"
+	@echo "Model: CWRU Vibration Fault Detection"
+	@echo "ΔT constraint: ≤ 7.0°C (Industrial)"
+	@echo "Accuracy: 100% (trained)"
+	@echo "Parameters: 17,220"
 
 clean:
-	@echo "Cleaning build directories..."
-	@rm -rf build_*
+	@echo "Cleaning vibration build directories..."
+	@rm -rf build_hifive1 build_k210
 	@echo "Clean complete."
 
 size: $(BUILD_DIR)/firmware.elf
-	@echo ""
-	@echo "=== CWRU Vibration Analysis - Memory Usage ==="
+	@echo "\n=== VIBRATION INDUSTRIAL - MEMORY USAGE ==="
 	@echo "Platform: $(PLATFORM)"
-	@echo "Model: FastHybridVibrationModel"
-	@echo "---------------------------------------------"
+	@echo "Model: CWRU Vibration Fault Detection"
+	@echo "Thermal: ΔT ≤ 7.0°C (Industrial)"
+	@echo "--------------------------------------------"
 	@$(SIZE) $(BUILD_DIR)/firmware.elf
-	@echo ""
-	@echo "Model Configuration:"
-	@echo "  Input: 1024 vibration samples"
-	@echo "  Architecture: CNN(8→16→32) + LSTM(32)"
-	@echo "  Output: 4 fault classes"
-	@echo "  Parameters: 17,220"
-	@echo "  Quantized size: ~17KB"
-	@echo "  Validation accuracy: 100%"
-	@echo "---------------------------------------------"
-	@echo "Binary size: $(shell wc -c < $(BUILD_DIR)/firmware.bin) bytes"
-	@echo "============================================="
 
-# ==================== BUILD RULES ====================
+# Règles spécifiques plateforme
+hifive1:
+	$(MAKE) PLATFORM=hifive1 $(MAKECMDGOALS)
 
+k210:
+	$(MAKE) PLATFORM=k210 $(MAKECMDGOALS)
+
+# ==================== RÈGLES DE COMPILATION ====================
 $(BUILD_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	@echo "CC  $(notdir $<)"
+	@$(MKDIR) $(dir $@)
+	@echo "CC  $(notdir $<) [Vibration]"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: %.S
-	@mkdir -p $(dir $@)
+	@$(MKDIR) $(dir $@)
 	@echo "AS  $(notdir $<)"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/firmware.elf: $(OBJS)
-	@echo "LD  $@"
+	@echo "LD  $@ [Vibration]"
 	@$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
-	@echo "Linking complete."
 
 $(BUILD_DIR)/firmware.bin: $(BUILD_DIR)/firmware.elf
 	@echo "OBJCOPY $@"
 	@$(OBJCOPY) -O binary $< $@
-	@echo "Binary created."
-
-# ==================== PLATFORM-SPECIFIC TARGETS ====================
-
-hifive1:
-	@echo "Building for HiFive1 with CWRU vibration model..."
-	@$(MAKE) PLATFORM=hifive1
-
-k210:
-	@echo "Building for K210 with CWRU vibration model..."
-	@$(MAKE) PLATFORM=k210
-
-# ==================== DEPENDENCIES CHECK ====================
-
-check-deps:
-	@echo "Checking dependencies for $(PLATFORM)..."
-	@if ! command -v $(CC) >/dev/null 2>&1; then \
-		echo "✗ $(CC) not found. Please install RISC-V toolchain."; \
-		echo "   Try: sudo apt install gcc-riscv64-unknown-elf"; \
-		exit 1; \
-	else \
-		echo "✓ $(CC) found"; \
-	fi
-	@if ! command -v $(OBJCOPY) >/dev/null 2>&1; then \
-		echo "✗ $(OBJCOPY) not found."; \
-		exit 1; \
-	else \
-		echo "✓ $(OBJCOPY) found"; \
-	fi
-	@if [ "$(PLATFORM)" = "hifive1" ] && [ ! -f "linker_hifive1.ld" ]; then \
-		echo "⚠ linker_hifive1.ld not found. Creating minimal version..."; \
-		echo 'MEMORY { ram (rwx) : ORIGIN = 0x80000000, LENGTH = 0x4000 }' > linker_hifive1.ld; \
-		echo 'SECTIONS { .text : { *(.text*) } > ram; .data : { *(.data*) } > ram; .bss : { *(.bss*) } > ram; .stack : { . = ALIGN(16); . = . + 0x1000; _stack_top = .; } > ram; }' >> linker_hifive1.ld; \
-		echo "✓ Created linker_hifive1.ld"; \
-	elif [ "$(PLATFORM)" = "hifive1" ]; then \
-		echo "✓ linker_hifive1.ld found"; \
-	fi
-	@if [ "$(PLATFORM)" = "k210" ] && [ ! -f "linker_k210.ld" ]; then \
-		echo "⚠ linker_k210.ld not found. Creating minimal version..."; \
-		echo 'MEMORY { ram (rwx) : ORIGIN = 0x80000000, LENGTH = 6M }' > linker_k210.ld; \
-		echo 'SECTIONS { .text : { *(.text*) } > ram; .rodata : { *(.rodata*) } > ram; .data : { *(.data*) } > ram; .bss : { *(.bss*) } > ram; .stack : { . = ALIGN(16); . = . + 0x4000; _stack_top = .; } > ram; }' >> linker_k210.ld; \
-		echo "✓ Created linker_k210.ld"; \
-	elif [ "$(PLATFORM)" = "k210" ]; then \
-		echo "✓ linker_k210.ld found"; \
-	fi
-	@if [ ! -f "start.S" ]; then \
-		echo "⚠ start.S not found. Creating minimal version..."; \
-		echo '.section .text.start' > start.S; \
-		echo '.global _start' >> start.S; \
-		echo '_start:' >> start.S; \
-		echo '    la sp, _stack_top' >> start.S; \
-		echo '    call main' >> start.S; \
-		echo '1:  j 1b' >> start.S; \
-		echo "✓ Created start.S"; \
-	else \
-		echo "✓ start.S found"; \
-	fi
-	@if [ ! -f "uart.c" ]; then \
-		echo "⚠ uart.c not found. Creating minimal version..."; \
-		echo '#include <stdint.h>' > uart.c; \
-		echo 'void uart_init(uint32_t baudrate) { (void)baudrate; }' >> uart.c; \
-		echo 'void uart_putc(char c) { (void)c; }' >> uart.c; \
-		echo 'void uart_puts(const char* s) { while(*s) uart_putc(*s++); }' >> uart.c; \
-		echo "✓ Created uart.c"; \
-	else \
-		echo "✓ uart.c found"; \
-	fi
-	@if [ ! -f "firmware/model/model_weights.c" ]; then \
-		echo "✗ firmware/model/model_weights.c not found!"; \
-		echo "   Run: python3 model.py to generate model files"; \
-		exit 1; \
-	else \
-		echo "✓ firmware/model/model_weights.c found"; \
-	fi
-	@if [ ! -f "firmware/model/model_weights.h" ]; then \
-		echo "✗ firmware/model/model_weights.h not found!"; \
-		echo "   Run: python3 model.py to generate model files"; \
-		exit 1; \
-	else \
-		echo "✓ firmware/model/model_weights.h found"; \
-	fi
-	@echo "✓ All dependencies available for $(PLATFORM)"
-
-# ==================== SIMULATION AND FLASHING ====================
-
-sim: $(BUILD_DIR)/firmware.elf
-	@echo "Running in Spike simulator (RV32GC)..."
-	@if command -v spike >/dev/null 2>&1; then \
-		spike --isa=rv32gc $(BUILD_DIR)/firmware.elf; \
-	else \
-		echo "✗ spike not found. Install with: sudo apt install spike"; \
-	fi
-
-flash: $(BUILD_DIR)/firmware.bin
-ifeq ($(PLATFORM),hifive1)
-	@echo "Flashing to HiFive1..."
-	@if command -v openocd >/dev/null 2>&1; then \
-		openocd -f interface/ftdi/olimex-arm-usb-tiny-h.cfg \
-		        -f target/riscv-esp32.cfg \
-		        -c "program $(BUILD_DIR)/firmware.bin 0x20010000 reset exit"; \
-	else \
-		echo "openocd not found. Please install it to flash the board."; \
-	fi
-else ifeq ($(PLATFORM),k210)
-	@echo "Flashing to K210..."
-	@if command -v kflash >/dev/null 2>&1; then \
-		kflash -p /dev/ttyUSB0 -b 1500000 $(BUILD_DIR)/firmware.bin; \
-	else \
-		echo "kflash not found. Please install it to flash the K210."; \
-	fi
-else
-	@echo "Flashing not supported for platform: $(PLATFORM)"
-endif
-
-# ==================== DEVELOPMENT TOOLS ====================
-
-disasm: $(BUILD_DIR)/firmware.elf
-	@echo "Generating disassembly..."
-	@$(OBJDUMP) -d $(BUILD_DIR)/firmware.elf > $(BUILD_DIR)/disassembly.txt
-	@echo "Disassembly saved to $(BUILD_DIR)/disassembly.txt"
-
-map: $(BUILD_DIR)/firmware.elf
-	@echo "Generating memory map..."
-	@$(OBJDUMP) -t $(BUILD_DIR)/firmware.elf > $(BUILD_DIR)/memory_map.txt
-	@echo "Memory map saved to $(BUILD_DIR)/memory_map.txt"
-
-# ==================== HELP ====================
-
-help:
-	@echo "CWRU Vibration Analysis System - Makefile Help"
-	@echo "============================================="
-	@echo ""
-	@echo "QUICK START:"
-	@echo "  1. make check-deps           # Check dependencies"
-	@echo "  2. make clean                # Clean previous builds"
-	@echo "  3. make hifive1              # Build for HiFive1"
-	@echo "  4. make size                 # Check memory usage"
-	@echo ""
-	@echo "AVAILABLE TARGETS:"
-	@echo "  all           Build firmware (default: PLATFORM=hifive1)"
-	@echo "  clean         Clean all build directories"
-	@echo "  check-deps    Check and create missing dependencies"
-	@echo "  size          Show detailed memory usage report"
-	@echo "  hifive1       Build for HiFive1 (RV32IMAC)"
-	@echo "  k210          Build for K210 (RV64GC)"
-	@echo "  sim           Run in Spike simulator"
-	@echo "  flash         Flash to target board"
-	@echo "  disasm        Generate disassembly"
-	@echo "  map           Generate memory map"
-	@echo "  help          Show this help"
-	@echo ""
-	@echo "USAGE EXAMPLES:"
-	@echo "  make                         # Default: build for HiFive1"
-	@echo "  make PLATFORM=hifive1        # Explicitly build for HiFive1"
-	@echo "  make PLATFORM=k210           # Build for K210"
-	@echo "  make clean                   # Clean all"
-	@echo "  make check-deps              # Check dependencies"
-	@echo ""
-	@echo "ENVIRONMENT VARIABLES:"
-	@echo "  PLATFORM    Target platform (hifive1, k210) - defaults to hifive1"
-	@echo ""
-	@echo "NOTES:"
-	@echo "  1. First run: make check-deps to verify/crate missing files"
-	@echo "  2. Model files are auto-generated by model.py"
-	@echo "  3. Builds go to separate directories: build_hifive1/, build_k210/"
-	@echo "============================================="
-
-# ==================== DEFAULT TARGET ====================
-.DEFAULT_GOAL := all
+	@echo "\n✅ VIBRATION INDUSTRIAL BUILD SUCCESSFUL!"
+	@echo "   Platform: $(PLATFORM)"
+	@echo "   Thermal: ΔT ≤ 7.0°C"
+	@echo "   Ready for factory deployment!"

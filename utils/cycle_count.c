@@ -34,15 +34,8 @@ uint32_t cycles_to_us(cycle_t cycles) {
 
 // Fonction supplémentaire pour éviter les erreurs de lien
 uint32_t cycles_to_us_simple(uint32_t cycles) {
-    // Version simplifiée pour les petits nombres - éviter division 64-bit
-    #if defined(HIFIVE1) && CPU_FREQ_HZ == 32000000
-        // HiFive1: 32 MHz, donc 1 us = 32 cycles
-        return cycles / 32;
-    #elif defined(K210) && CPU_FREQ_HZ == 400000000
-        // K210: 400 MHz, donc 1 us = 400 cycles
-        return cycles / 400;
-    #else
-        // Fallback: division par 1000 (approximation)
-        return cycles / 1000;
-    #endif
+    // Version simplifiée pour les petits nombres
+    uint32_t freq_mhz = cpu_freq_hz / 1000000;
+    if (freq_mhz == 0) freq_mhz = 1;
+    return cycles / freq_mhz;
 }
