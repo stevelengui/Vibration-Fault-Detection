@@ -26,5 +26,22 @@ git clone https://github.com/stevelengui/Vibration-Fault-Detection.git
 cd Vibration-Fault-Detection
 pip install -r requirements.txt
 
+Compiler le code python
+python3 model.py
 
+# Recompilez pour HiFive1
+make
+# Nettoyage et compilation pour K210
+make PLATFORM=k210 clean all
 
+# Compilation industrielle (ΔT ≤ 7°C, fiabilité 24/7)
+make DOMAIN=industrial PLATFORM=hifive1 clean all
+
+# Compilation avec profil de performance
+make PROFILE=performance PLATFORM=hifive1 clean all
+
+# Compilation avec débogage
+make DEBUG=1 PLATFORM=hifive1 clean all
+
+# Afficher l'aide
+make help
